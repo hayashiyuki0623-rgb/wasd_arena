@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>WASD Multiplayer Arena - WebRTC</title>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #0b0f19;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    #game-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      max-width: 1152px;
+      max-height: 648px;
+      aspect-ratio: 16 / 9;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+      background: #080c14;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(11, 15, 25, 0.88);
+      backdrop-filter: blur(8px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+    }
+    .panel {
+      background: #151d2f;
+      border: 1px solid #2d3b55;
+      padding: 30px 40px;
+      border-radius: 12px;
+      text-align: center;
+      max-width: 500px;
+      width: 90%;
+      box-shadow: 0 16px 32px rgba(0,0,0,0.5);
+    }
+    h1 {
+      font-size: 26px;
+      color: #38bdf8;
+      margin-bottom: 6px;
+      letter-spacing: 1px;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 22px;
+    }
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 12px 18px;
+      margin: 10px 0;
+      font-size: 16px;
+      font-weight: bold;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-solo { background: #334155; color: #fff; }
+    .btn-solo:hover { background: #475569; }
+    .btn-host { background: #0284c7; color: #fff; }
+    .btn-host:hover { background: #0369a1; }
+    .btn-join { background: #10b981; color: #fff; }
+    .btn-join:hover { background: #059669; }
+    .join-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .input-code {
+      flex: 1;
+      padding: 12px;
+      border-radius: 8px;
+      border: 2px solid #334155;
+      background: #0f172a;
+      color: #f8fafc;
+      font-size: 18px;
+      text-transform: uppercase;
+      text-align: center;
+      letter-spacing: 2px;
+      outline: none;
+    }
+    .input-code:focus { border-color: #10b981; }
+    .status-msg {
+      margin-top: 14px;
+      font-size: 14px;
+      color: #facc15;
+      min-height: 20px;
+      word-break: break-all;
+    }
+    #hud {
+      position: absolute;
+      top: 16px;
+      left: 20px;
+      right: 20px;
+      display: flex;
+      justify-content: space-between;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .hud-text {
+      font-size: 20px;
+      font-weight: bold;
+      color: #fde047;
+      text-shadow: 0 2px 4px #000;
+    }
+    .room-badge {
+      background: rgba(30, 41, 59, 0.85);
+      border: 1px solid #38bdf8;
+      color: #38bdf8;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      letter-spacing: 1px;
+    }
+    #game-over-box {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.8);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 30;
+    }
+    #game-over-box h2 {
+      font-size: 48px;
+      color: #ef4444;
+      margin-bottom: 12px;
+    }
+    #game-over-box p {
+      font-size: 22px;
+      color: #f8fafc;
+      margin-bottom: 24px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="game-container">
+  <canvas id="cv" width="1152" height="648"></canvas>
+
+  <div id="hud">
+    <div id="hud-stats" class="hud-text">SCORE: 0   HP: ♥ ♥ ♥ ♥ ♥</div>
+    <div id="room-badge" class="room-badge" style="display:none;">ROOM: ABCD</div>
+  </div>
+
+  <div id="game-over-box">
+    <h2>GAME OVER</h2>
+    <p id="final-score">SCORE: 0</p>
+    <button class="btn btn-host" style="width:200px;" onclick="restartGame()">もう一度遊ぶ</button>
+  </div>
+
+  <!-- ロビー画面 -->
+  <div id="lobby" class="overlay">
+    <div class="panel">
+      <h1>⚔️ WASD ARENA ⚔️</h1>
+      <p class="subtitle">WebRTC P2P ルームコード接続（URLで招待可能）</p>
+
+      <button class="btn btn-solo" onclick="startSolo()">🎮 1人で遊ぶ (ソロ)</button>
+      <hr style="border:0; border-top:1px solid #2d3b55; margin:14px 0;">
+      <button class="btn btn-host" onclick="startHost()">👑 部屋を作る (ホスト - コード発行)</button>
+
+      <div class="join-group">
+        <input type="text" id="join-code-input" class="input-code" placeholder="4桁コード" maxlength="6">
+        <button class="btn btn-join" style="width:120px; margin:0;" onclick="startJoin()">🚪 参加</button>
+      </div>
+
+      <div id="status-msg" class="status-msg"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// --- 音声シンセサイザー (Web Audio API) ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playBeep(freq, type, duration) {
+  try {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+  } catch(e) {}
+}
+const sfxShoot = () => playBeep(480, 'square', 0.08);
+const sfxCoin = () => playBeep(880, 'triangle', 0.15);
+const sfxHit = () => playBeep(160, 'sawtooth', 0.2);
+const sfxOver = () => playBeep(110, 'sawtooth', 0.6);
+
+// --- ゲーム状態 ---
+const canvas = document.getElementById('cv');
+const ctx = canvas.getContext('2d');
+const W = 1152, H = 648;
+
+let state = 'LOBBY'; // LOBBY, PLAYING, GAMEOVER
+let isMultiplayer = false;
+let isHost = false;
+let myId = 1;
+let peer = null;
+let conn = null;
+let roomCode = '';
+
+const PLAYER_COLORS = {
+  1: '#38bdf8', // 水色
+  2: '#4ade80', // 緑色
+};
+
+const players = {};
+let bullets = [];
+let enemies = [];
+let coins = [];
+let particles = [];
+
+let score = 0;
+let survivalTime = 0;
+let enemySpawnTimer = 1.2;
+let coinSpawnTimer = 0.5;
+
+let moveSpeed = 340;
+let dashSpeed = 850;
+let dashTime = 0;
+let dashCooldown = 0;
+let shootCooldown = 0;
+let mousePos = { x: W/2, y: H/2 };
+const keys = {};
+
+// キーボード＆マウスリスナー
+window.addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  if (e.key === ' ' || e.key === 'Shift') keys['dash'] = true;
+  if (e.key.toLowerCase() === 'r' && state === 'GAMEOVER') restartGame();
+});
+window.addEventListener('keyup', e => {
+  keys[e.key.toLowerCase()] = false;
+  if (e.key === ' ' || e.key === 'Shift') keys['dash'] = false;
+});
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width;
+  const scaleY = H / rect.height;
+  mousePos.x = (e.clientX - rect.left) * scaleX;
+  mousePos.y = (e.clientY - rect.top) * scaleY;
+});
+canvas.addEventListener('mousedown', e => {
+  if (e.button === 0) keys['mouse0'] = true;
+});
+canvas.addEventListener('mouseup', e => {
+  if (e.button === 0) keys['mouse0'] = false;
+});
+
+function setStatus(msg) {
+  document.getElementById('status-msg').innerText = msg;
+}
+
+// --- ソロプレイ ---
+function startSolo() {
+  isMultiplayer = false;
+  isHost = true;
+  myId = 1;
+  initPlayer(1, W/2, H/2);
+  startGame();
+}
+
+// --- WebRTC PeerJS接続 (4桁コード) ---
+const PEER_PREFIX = 'wasd-arena-v1-';
+
+function genCode() {
+  const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for(let i=0; i<4; i++) s += c[Math.floor(Math.random()*c.length)];
+  return s;
+}
+
+function startHost() {
+  isMultiplayer = true;
+  isHost = true;
+  myId = 1;
+  roomCode = genCode();
+  setStatus('P2Pクラウドに接続中...');
+
+  peer = new Peer(PEER_PREFIX + roomCode, {
+    config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+  });
+
+  peer.on('open', id => {
+    // URLパラメータ付きリンクを作成
+    const shareUrl = window.location.origin + window.location.pathname + '?room=' + roomCode;
+    try { navigator.clipboard.writeText(shareUrl); } catch(e) {}
+
+    setStatus(`【合言葉: ${roomCode}】\n招待URLをクリップボードにコピーしました！\n友達の参加を待機中...`);
+    document.getElementById('room-badge').innerText = `ROOM: ${roomCode} (HOST)`;
+    document.getElementById('room-badge').style.display = 'block';
+  });
+
+  peer.on('connection', c => {
+    conn = c;
+    setupConnection();
+  });
+
+  peer.on('error', err => {
+    if (err.type === 'unavailable-id') {
+      startHost(); // コード被りは再試行
+    } else {
+      setStatus('接続エラー: ' + err.type);
+    }
+  });
+}
+
+function startJoin(targetCode) {
+  const code = (targetCode || document.getElementById('join-code-input').value).toUpperCase().trim();
+  if (!code) {
+    setStatus('4桁コードを入力してください！');
+    return;
+  }
+  isMultiplayer = true;
+  isHost = false;
+  myId = 2;
+  roomCode = code;
+  setStatus(`部屋 ${code} に接続中...`);
+
+  peer = new Peer({
+    config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+  });
+
+  peer.on('open', id => {
+    conn = peer.connect(PEER_PREFIX + roomCode, { reliable: true });
+    setupConnection();
+  });
+
+  peer.on('error', err => {
+    setStatus('接続エラー: ホストが見つかりません (' + err.type + ')');
+  });
+}
+
+function setupConnection() {
+  conn.on('open', () => {
+    document.getElementById('room-badge').innerText = `ROOM: ${roomCode} (P${myId})`;
+    document.getElementById('room-badge').style.display = 'block';
+
+    initPlayer(1, W/3, H/2);
+    initPlayer(2, (W/3)*2, H/2);
+    startGame();
+  });
+
+  conn.on('data', data => {
+    if (data.t === 'syncP') {
+      const p = players[data.id];
+      if (p) {
+        p.x += (data.x - p.x) * 0.4;
+        p.y += (data.y - p.y) * 0.4;
+        p.aim = data.aim;
+        if (data.dash) p.afterimages.push({ x: data.x, y: data.y, a: 0.6 });
+      }
+    } else if (data.t === 'bullet') {
+      bullets.push(data.b);
+      sfxShoot();
+    } else if (data.t === 'syncG') {
+      if (!isHost) {
+        score = data.score;
+        coins = data.coins;
+        enemies = data.enemies;
+        updateHUD();
+      }
+    } else if (data.t === 'over') {
+      triggerGameOver(data.score);
+    } else if (data.t === 'restart') {
+      restartGameLocal();
+    }
+  });
+
+  conn.on('close', () => {
+    setStatus('相手が切断しました');
+  });
+}
+
+function sendNet(obj) {
+  if (conn && conn.open) conn.send(obj);
+}
+
+// URL引数による自動参加 (?room=ABCD)
+window.addEventListener('load', () => {
+  const params = new URLSearchParams(window.location.search);
+  const r = params.get('room');
+  if (r) {
+    document.getElementById('join-code-input').value = r;
+    startJoin(r);
+  }
+});
+
+// --- ゲームループ & エンティティ ---
+function initPlayer(id, x, y) {
+  players[id] = {
+    id: id,
+    x: x, y: y,
+    vx: 0, vy: 0,
+    aim: 0,
+    hp: 5, maxHp: 5,
+    color: PLAYER_COLORS[id] || '#fff',
+    afterimages: []
+  };
+}
+
+function startGame() {
+  document.getElementById('lobby').style.display = 'none';
+  document.getElementById('game-over-box').style.display = 'none';
+  state = 'PLAYING';
+  score = 0;
+  survivalTime = 0;
+  bullets = [];
+  enemies = [];
+  coins = [];
+  particles = [];
+  dashTime = 0;
+  dashCooldown = 0;
+  shootCooldown = 0;
+
+  if (isHost) {
+    for(let i=0; i<5; i++) spawnCoin();
+  }
+  updateHUD();
+}
+
+function restartGame() {
+  if (isMultiplayer) sendNet({ t: 'restart' });
+  restartGameLocal();
+}
+
+function restartGameLocal() {
+  if (isMultiplayer) {
+    initPlayer(1, W/3, H/2);
+    initPlayer(2, (W/3)*2, H/2);
+  } else {
+    initPlayer(1, W/2, H/2);
+  }
+  startGame();
+}
+
+function triggerGameOver(finalScore) {
+  state = 'GAMEOVER';
+  sfxOver();
+  document.getElementById('final-score').innerText = 'SCORE: ' + finalScore;
+  document.getElementById('game-over-box').style.display = 'flex';
+}
+
+function spawnCoin() {
+  coins.push({
+    x: 60 + Math.random() * (W - 120),
+    y: 80 + Math.random() * (H - 140),
+    pulse: Math.random() * 6.28
+  });
+}
+
+function spawnEnemy() {
+  const side = Math.floor(Math.random() * 4);
+  let x = 0, y = 0;
+  if (side === 0) { x = Math.random() * W; y = -30; }
+  else if (side === 1) { x = Math.random() * W; y = H + 30; }
+  else if (side === 2) { x = -30; y = Math.random() * H; }
+  else { x = W + 30; y = Math.random() * H; }
+
+  const isBig = Math.random() < 0.22;
+  enemies.push({
+    x, y,
+    speed: isBig ? 90 : 120 + Math.random() * 60,
+    r: isBig ? 26 : 16,
+    hp: isBig ? 3 : 1,
+    isBig
+  });
+}
+
+function spawnBurst(x, y, color, count) {
+  for(let i=0; i<count; i++) {
+    const ang = Math.random() * 6.28;
+    const spd = 60 + Math.random() * 220;
+    particles.push({
+      x, y,
+      vx: Math.cos(ang) * spd,
+      vy: Math.sin(ang) * spd,
+      color,
+      life: 0.3 + Math.random() * 0.3,
+      size: 3 + Math.random() * 4
+    });
+  }
+}
+
+function updateHUD() {
+  let s = `SCORE: ${score}   `;
+  for(const pid in players) {
+    const p = players[pid];
+    let hearts = '';
+    for(let i=0; i<p.maxHp; i++) hearts += i < p.hp ? '♥' : '♡';
+    s += ` [P${pid}${pid == myId ? '(YOU)' : ''}: ${hearts}] `;
+  }
+  document.getElementById('hud-stats').innerText = s;
+}
+
+// メインループ
+let lastTime = performance.now();
+function loop(now) {
+  const dt = Math.min((now - lastTime) / 1000, 0.1);
+  lastTime = now;
+
+  if (state === 'PLAYING') {
+    survivalTime += dt;
+    const me = players[myId];
+
+    if (me) {
+      // WASD 入力
+      let dx = 0, dy = 0;
+      if (keys['w'] || keys['arrowup']) dy -= 1;
+      if (keys['s'] || keys['arrowdown']) dy += 1;
+      if (keys['a'] || keys['arrowleft']) dx -= 1;
+      if (keys['d'] || keys['arrowright']) dx += 1;
+
+      const len = Math.hypot(dx, dy);
+      if (len > 0) { dx /= len; dy /= len; }
+
+      if (dashCooldown > 0) dashCooldown -= dt;
+      if (dashTime > 0) {
+        dashTime -= dt;
+        me.afterimages.push({ x: me.x, y: me.y, a: 0.6 });
+      }
+
+      if (keys['dash'] && dashCooldown <= 0 && len > 0) {
+        dashTime = 0.16;
+        dashCooldown = 0.85;
+        spawnBurst(me.x, me.y, me.color, 12);
+      }
+
+      const spd = dashTime > 0 ? dashSpeed : moveSpeed;
+      me.vx += (dx * spd - me.vx) * Math.min(1, dt * 14);
+      me.vy += (dy * spd - me.vy) * Math.min(1, dt * 14);
+      me.x += me.vx * dt;
+      me.y += me.vy * dt;
+      me.x = Math.max(20, Math.min(W - 20, me.x));
+      me.y = Math.max(20, Math.min(H - 20, me.y));
+
+      me.aim = Math.atan2(mousePos.y - me.y, mousePos.x - me.x);
+
+      // ショット
+      if (shootCooldown > 0) shootCooldown -= dt;
+      if (keys['mouse0'] && shootCooldown <= 0) {
+        shootCooldown = 0.15;
+        const b = {
+          x: me.x + Math.cos(me.aim) * 24,
+          y: me.y + Math.sin(me.aim) * 24,
+          vx: Math.cos(me.aim) * 780,
+          vy: Math.sin(me.aim) * 780,
+          life: 1.5,
+          color: me.color,
+          owner: myId
+        };
+        bullets.push(b);
+        sfxShoot();
+        if (isMultiplayer) sendNet({ t: 'bullet', b });
+      }
+
+      // ネットワーク送信
+      if (isMultiplayer) {
+        sendNet({ t: 'syncP', id: myId, x: me.x, y: me.y, aim: me.aim, dash: dashTime > 0 });
+      }
+    }
+
+    // 残像減衰
+    for(const pid in players) {
+      const aft = players[pid].afterimages;
+      for(let i=aft.length-1; i>=0; i--) {
+        aft[i].a -= dt * 3.5;
+        if (aft[i].a <= 0) aft.splice(i, 1);
+      }
+    }
+
+    // 弾更新
+    for(let i=bullets.length-1; i>=0; i--) {
+      const b = bullets[i];
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.life -= dt;
+      if (b.life <= 0 || b.x < -20 || b.x > W+20 || b.y < -20 || b.y > H+20) {
+        bullets.splice(i, 1);
+      }
+    }
+
+    // ホスト権限：敵とコインの管理
+    if (isHost) {
+      coinSpawnTimer -= dt;
+      if (coinSpawnTimer <= 0) {
+        coinSpawnTimer = 2.0;
+        if (coins.length < 10) spawnCoin();
+      }
+
+      // コイン取得判定
+      for(let i=coins.length-1; i>=0; i--) {
+        const c = coins[i];
+        c.pulse = (c.pulse || 0) + dt * 5;
+        let taken = false;
+        for(const pid in players) {
+          const p = players[pid];
+          if (Math.hypot(p.x - c.x, p.y - c.y) < 34) {
+            score += 100;
+            spawnBurst(c.x, c.y, '#facc15', 14);
+            sfxCoin();
+            coins.splice(i, 1);
+            taken = true;
+            updateHUD();
+            break;
+          }
+        }
+        if (taken) continue;
+      }
+
+      // 敵生成
+      enemySpawnTimer -= dt;
+      if (enemySpawnTimer <= 0) {
+        enemySpawnTimer = Math.max(0.4, 1.4 - survivalTime * 0.015);
+        spawnEnemy();
+      }
+
+      // 敵移動 & 当たり判定
+      for(let i=enemies.length-1; i>=0; i--) {
+        const e = enemies[i];
+        let target = null;
+        let minDist = 999999;
+        for(const pid in players) {
+          const p = players[pid];
+          const d = Math.hypot(p.x - e.x, p.y - e.y);
+          if (d < minDist) { minDist = d; target = p; }
+        }
+        if (target) {
+          const ang = Math.atan2(target.y - e.y, target.x - e.x);
+          e.x += Math.cos(ang) * e.speed * dt;
+          e.y += Math.sin(ang) * e.speed * dt;
+        }
+
+        // 弾ヒット判定
+        let killed = false;
+        for(let j=bullets.length-1; j>=0; j--) {
+          const b = bullets[j];
+          if (Math.hypot(e.x - b.x, e.y - b.y) < e.r + 8) {
+            bullets.splice(j, 1);
+            e.hp--;
+            spawnBurst(e.x, e.y, '#f97316', 6);
+            if (e.hp <= 0) {
+              score += 50;
+              spawnBurst(e.x, e.y, '#f43f5e', 18);
+              enemies.splice(i, 1);
+              killed = true;
+              updateHUD();
+            }
+            break;
+          }
+        }
+        if (killed) continue;
+
+        // プレイヤー衝突
+        for(const pid in players) {
+          const p = players[pid];
+          if (Math.hypot(e.x - p.x, e.y - p.y) < e.r + 20) {
+            p.hp--;
+            spawnBurst(p.x, p.y, '#ef4444', 22);
+            sfxHit();
+            enemies.splice(i, 1);
+            updateHUD();
+            if (p.hp <= 0) {
+              let allDead = true;
+              for(const k in players) if (players[k].hp > 0) allDead = false;
+              if (allDead) {
+                triggerGameOver(score);
+                if (isMultiplayer) sendNet({ t: 'over', score });
+              }
+            }
+            break;
+          }
+        }
+      }
+
+      // クライアントへ定期同期
+      if (isMultiplayer) {
+        sendNet({ t: 'syncG', score, coins, enemies });
+      }
+    }
+
+    // パーティクル更新
+    for(let i=particles.length-1; i>=0; i--) {
+      const pt = particles[i];
+      pt.x += pt.vx * dt;
+      pt.y += pt.vy * dt;
+      pt.vx *= 0.92;
+      pt.vy *= 0.92;
+      pt.life -= dt;
+      if (pt.life <= 0) particles.splice(i, 1);
+    }
+  }
+
+  // --- 描画 ---
+  ctx.fillStyle = '#080c14';
+  ctx.fillRect(0, 0, W, H);
+
+  // グリッド線
+  ctx.strokeStyle = '#151d2f';
+  ctx.lineWidth = 1;
+  for(let x=0; x<W; x+=64) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for(let y=0; y<H; y+=64) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  if (state === 'PLAYING' || state === 'GAMEOVER') {
+    // コイン
+    for(const c of coins) {
+      const r = 11 + Math.sin(c.pulse || 0) * 2.5;
+      ctx.fillStyle = 'rgba(250, 204, 21, 0.25)';
+      ctx.beginPath(); ctx.arc(c.x, c.y, r + 4, 0, 6.28); ctx.fill();
+      ctx.fillStyle = '#eab308';
+      ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, 6.28); ctx.fill();
+      ctx.fillStyle = '#fef08a';
+      ctx.beginPath(); ctx.arc(c.x, c.y, r * 0.5, 0, 6.28); ctx.fill();
+    }
+
+    // 弾
+    for(const b of bullets) {
+      ctx.fillStyle = b.color || '#38bdf8';
+      ctx.beginPath(); ctx.arc(b.x, b.y, 6, 0, 6.28); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(b.x, b.y, 3, 0, 6.28); ctx.fill();
+    }
+
+    // 敵
+    for(const e of enemies) {
+      ctx.fillStyle = e.isBig ? '#c084fc' : '#f43f5e';
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, 6.28); ctx.fill();
+      ctx.fillStyle = '#1e1b4b';
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r * 0.45, 0, 6.28); ctx.fill();
+    }
+
+    // パーティクル
+    for(const pt of particles) {
+      ctx.globalAlpha = Math.max(0, Math.min(1, pt.life * 2.5));
+      ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.size, 0, 6.28); ctx.fill();
+      ctx.globalAlpha = 1.0;
+    }
+
+    // プレイヤー
+    for(const pid in players) {
+      const p = players[pid];
+
+      // 残像
+      for(const a of p.afterimages) {
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = a.a * 0.5;
+        ctx.beginPath(); ctx.arc(a.x, a.y, 20, 0, 6.28); ctx.fill();
+        ctx.globalAlpha = 1.0;
+      }
+
+      // 砲身
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 8;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x + Math.cos(p.aim) * 28, p.y + Math.sin(p.aim) * 28);
+      ctx.stroke();
+
+      // 本体
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 20, 0, 6.28); ctx.fill();
+
+      // 目
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(p.x + Math.cos(p.aim) * 7, p.y + Math.sin(p.aim) * 7, 6, 0, 6.28); ctx.fill();
+
+      // ネームタグ
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`P${pid}${pid == myId ? ' (YOU)' : ''}`, p.x, p.y - 28);
+    }
+  }
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+
+</body>
+</html>
